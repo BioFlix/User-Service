@@ -1,0 +1,49 @@
+# Builds the Docker image on every push and pull request.
+# On push to main it is also pushed to Docker Hub as <namespace>/bioflix-user-service:latest
+#
+# Needed in GitHub (Settings -> Secrets and variables -> Actions):
+#   secret   DOCKERHUB_USERNAME   Docker Hub user that logs in
+#   secret   DOCKERHUB_TOKEN      Docker Hub access token (Account settings -> Personal access tokens)
+#   variable DOCKERHUB_NAMESPACE  (optional) org on Docker Hub, defaults to DOCKERHUB_USERNAME
+# Until the secrets exist, the workflow only builds (no push) – so it never fails because of them.
+name: Docker image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: bioflix-user-service
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME || 'bioflix' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != '' && github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build (and push on main)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ env.DOCKERHUB_USERNAME != '' && github.event_name == 'push' }}
+          tags: |
+            ${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
