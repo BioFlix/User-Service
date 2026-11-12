@@ -21,10 +21,3 @@ exports.onExecutePostLogin = async (event, api) => {
   api.accessToken.setCustomClaim('https://cinema.local/name', event.user.name);
 };
 ```
-
-## Docker
-```
-docker build -t bioflix-user-service .
-```
-GitHub Actions (`.github/workflows/docker-image.yml`) bygger billedet ved hver push og pusher det til Docker Hub
-som `<namespace>/bioflix-user-service:latest`, når secrets `DOCKERHUB_USERNAME` og `DOCKERHUB_TOKEN` er sat.
