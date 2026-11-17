@@ -6,7 +6,7 @@ spring:
     name: user-service
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:5432/users_db
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/users_db
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:postgres}
 
@@ -14,21 +14,42 @@ spring:
     hibernate:
       ddl-auto: update        # OK til start – skift til Flyway/Liquibase senere
     open-in-view: false
+    # Run schema.sql after Hibernate has created the tables (partial indexes Hibernate cannot make)
+    defer-datasource-initialization: true
+
+  sql:
+    init:
+      mode: always
 
   security:
     oauth2:
       resourceserver:
         jwt:
-          # Auth0: JWKS hentes automatisk fra <issuer>/.well-known/jwks.json
           issuer-uri: https://${AUTH0_DOMAIN:your-tenant.eu.auth0.com}/
           audiences: ${AUTH0_AUDIENCE:https://api.cinema.local}
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    connection-timeout: 5s
+    publisher-confirm-type: simple
+
 app:
   auth0:
-    # Access tokens fra Auth0 har ikke e-mail som standard.
-    # Tilføj et custom claim med en Auth0 Action og skriv navnet her.
     email-claim: ${AUTH0_EMAIL_CLAIM:https://cinema.local/email}
     name-claim: ${AUTH0_NAME_CLAIM:https://cinema.local/name}
+  admin-emails: ${ADMIN_EMAILS:}
+  rabbitmq:
+    exchange: cinema.events
+  outbox:
+    poll-interval: ${OUTBOX_POLL_INTERVAL:1000}   # ms
+    batch-size: 50
+    keep-published-for: 7d
+  dev:
+    jwt-issuer: bioflix-dev
+    jwt-secret: ${DEV_JWT_SECRET:local-dev-secret-change-me-0123456789abcdef}
 
 management:
   endpoints:

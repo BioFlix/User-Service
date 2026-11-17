@@ -3,11 +3,15 @@ package bioflix.user.repository;
 import bioflix.user.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
-public interface UserRepository extends JpaRepository<User, Long> {
+public interface UserRepository extends JpaRepository<User, UUID> {
 
-    Optional<User> findByAuth0Id(String auth0Id);
+    Optional<User> findByAuth0Sub(String auth0Sub);
 
-    boolean existsByEmailAndIdNot(String email, Long id);
+    List<User> findAllByDeletedAtIsNullOrderByCreatedAt();
+
+    boolean existsByEmailIgnoreCaseAndDeletedAtIsNullAndIdNot(String email, UUID id);
 }

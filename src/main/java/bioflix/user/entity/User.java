@@ -12,41 +12,51 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @Entity
 @Table(name = "users")
 public class User {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
 
-    /** The "sub" claim from the Auth0 token, e.g. "auth0|65f1...". */
-    @Column(name = "auth0_id", nullable = false, unique = true)
-    private String auth0Id;
+    @Column(name = "auth0_sub", nullable = false, unique = true, length = 128)
+    private String auth0Sub;
 
-    @Column(unique = true)
+    // Unique (case-insensitive) among active users: see users_email_active in schema.sql
+    @Column(nullable = false, length = 320)
     private String email;
 
+    @Column(name = "full_name", nullable = false, length = 200)
     private String fullName;
 
+    @Column(length = 32)
     private String phone;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Role role = Role.CUSTOMER;
 
-    @Column(nullable = false, updatable = false)
+    @Column(name = "sms_opt_in", nullable = false)
+    private boolean smsOptIn;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
 
     protected User() {
         // for JPA
     }
 
-    public User(String auth0Id, String email, String fullName) {
-        this.auth0Id = auth0Id;
+    public User(String auth0Sub, String email, String fullName) {
+        this.auth0Sub = auth0Sub;
         this.email = email;
         this.fullName = fullName;
     }
@@ -62,8 +72,19 @@ public class User {
         updatedAt = Instant.now();
     }
 
-    public Long getId() { return id; }
-    public String getAuth0Id() { return auth0Id; }
+    /* Soft delete: the row stays (old bookings point at it), the personal data is anonymised. */
+    public void markDeleted() {
+        email = "deleted-" + id + "@deleted.invalid";
+        fullName = "Deleted user";
+        phone = null;
+        smsOptIn = false;
+        deletedAt = Instant.now();
+    }
+
+    public boolean isDeleted() { return deletedAt != null; }
+
+    public UUID getId() { return id; }
+    public String getAuth0Sub() { return auth0Sub; }
     public String getEmail() { return email; }
     public void setEmail(String email) { this.email = email; }
     public String getFullName() { return fullName; }
@@ -72,6 +93,9 @@ public class User {
     public void setPhone(String phone) { this.phone = phone; }
     public Role getRole() { return role; }
     public void setRole(Role role) { this.role = role; }
+    public boolean isSmsOptIn() { return smsOptIn; }
+    public void setSmsOptIn(boolean smsOptIn) { this.smsOptIn = smsOptIn; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+    public Instant getDeletedAt() { return deletedAt; }
 }

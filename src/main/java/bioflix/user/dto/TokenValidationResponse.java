@@ -2,13 +2,11 @@ package bioflix.user.dto;
 
 import bioflix.user.entity.Role;
 
-/**
- * Returned to the API gateway. The gateway forwards userId as X-User-Id
- * (and role as X-User-Role) to the downstream services.
- */
+import java.util.UUID;
+
 public record TokenValidationResponse(
-        Long userId,
-        String auth0Id,
+        UUID userId,
+        String auth0Sub,
         String email,
         Role role
 ) {

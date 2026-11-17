@@ -1,8 +1,11 @@
 package bioflix.user.controller;
 
+import bioflix.user.dto.ChangeRoleRequest;
 import bioflix.user.dto.UpdateUserRequest;
 import bioflix.user.dto.UserResponse;
+import bioflix.user.entity.Role;
 import bioflix.user.entity.User;
+import bioflix.user.exception.ForbiddenException;
 import bioflix.user.service.UserService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/users")
@@ -28,7 +32,6 @@ public class UserController {
         this.userService = userService;
     }
 
-    /** The logged-in user's own profile (created on first call). */
     @GetMapping("/me")
     public UserResponse me(@AuthenticationPrincipal Jwt jwt) {
         return UserResponse.from(userService.getOrCreate(jwt));
@@ -47,15 +50,38 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
-    // TODO: restrict the endpoints below to ADMIN (e.g. with @PreAuthorize + roles from Auth0)
+    // ---- ADMIN  ----
 
     @GetMapping
-    public List<UserResponse> getAll() {
+    public List<UserResponse> getAll(@AuthenticationPrincipal Jwt jwt) {
+        userService.requireAdmin(userService.getOrCreate(jwt));
         return userService.getAll();
     }
 
     @GetMapping("/{id}")
-    public UserResponse getById(@PathVariable Long id) {
+    public UserResponse getById(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        User caller = userService.getOrCreate(jwt);
+        if (!caller.getId().equals(id)) {
+            userService.requireAdmin(caller);
+        }
         return userService.getById(id);
+    }
+
+    @PutMapping("/{id}/role")
+    public UserResponse changeRole(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                   @Valid @RequestBody ChangeRoleRequest request) {
+        User caller = userService.getOrCreate(jwt);
+        userService.requireAdmin(caller);
+        if (caller.getId().equals(id) && request.role() != Role.ADMIN) {
+            throw new ForbiddenException("An admin cannot remove their own ADMIN role");
+        }
+        return userService.changeRole(id, request.role());
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        userService.requireAdmin(userService.getOrCreate(jwt));
+        userService.delete(id);
+        return ResponseEntity.noContent().build();
     }
 }
