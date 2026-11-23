@@ -27,23 +27,89 @@ Postgres og RabbitMQ kører (`DB_HOST`, `DB_PORT`, `RABBITMQ_HOST`, `RABBITMQ_PO
 Kører notification-service’s compose allerede RabbitMQ på 5672, så start kun databasen herfra:
 `docker compose up -d user-db` og sæt `DB_PORT=5435` – så bruger begge services samme RabbitMQ.
 
-### Prøv det af
+### Kør fra IntelliJ (anbefalet sammen med notification-service)
+1. Start kun databasen: `docker compose up -d user-db` (Postgres på **5435** med `users_db`).
+   Brug ikke `docker compose up` uden `user-db` – det starter en RabbitMQ mere på 5672.
+2. RabbitMQ og Mailpit kører fra notification-service (`docker compose up -d rabbitmq mailpit` i den mappe).
+3. Run configuration for `UserServiceApplication` → *Environment variables*:
+   ```
+   SPRING_PROFILES_ACTIVE=dev;DB_PORT=5435;ADMIN_EMAILS=admin@bioflix.local
+   ```
+   `DB_USER`/`DB_PASSWORD` er som standard `postgres`/`postgres`, hvilket passer til containeren.
+4. Tjek http://localhost:8081/actuator/health → `UP`.
+
+Nulstil databasen (sletter alle testdata) – fx hvis den er oprettet med et andet password eller gamle tal-id’er:
 ```bash
-# 1. Hent et token (som hvis Anna loggede ind via Auth0)
-TOKEN=$(curl -s -X POST localhost:8081/api/dev/token -H 'Content-Type: application/json' \
-  -d '{"sub":"auth0|anna","email":"anna@example.com","name":"Anna Hansen"}' | jq -r .access_token)
-
-# 2. Første kald opretter brugeren -> user.registered
-curl -H "Authorization: Bearer $TOKEN" localhost:8081/api/auth/validate
-
-# 3. Opdater profil -> user.updated
-curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' localhost:8081/api/users/me \
-  -d '{"email":"anna@example.com","fullName":"Anna Hansen","phone":"+4512345678","smsOptIn":true}'
-
-# 4. Slet konto -> user.deleted
-curl -X DELETE -H "Authorization: Bearer $TOKEN" localhost:8081/api/users/me
+docker compose down -v
+docker compose up -d user-db
 ```
-Kører notification-service mod samme RabbitMQ, dukker velkomstmailen op i Mailpit (http://localhost:8025).
+
+### Prøv det af
+Kør alle kommandoer i **samme** terminalfane, så variablerne bevares.
+
+**Tokens** – en almindelig bruger og en admin:
+```bash
+ANNA=$(curl -s -X POST localhost:8081/api/dev/token -H 'Content-Type: application/json' -d '{"sub":"auth0|anna","email":"anna@example.com","name":"Anna Hansen"}' | jq -r .access_token)
+ADMIN=$(curl -s -X POST localhost:8081/api/dev/token -H 'Content-Type: application/json' -d '{"sub":"auth0|admin","email":"admin@bioflix.local","name":"Admin"}' | jq -r .access_token)
+```
+
+**A. Første login** – opretter brugeren og sender `user.registered`. Gem Annas UUID; velkomstmailen dukker op i Mailpit:
+```bash
+ANNA_ID=$(curl -s -H "Authorization: Bearer $ANNA" localhost:8081/api/auth/validate | jq -r .userId); echo $ANNA_ID
+```
+
+**B. Opdater profil** – sender `user.updated`, og notification-service gemmer telefonnummeret:
+```bash
+curl -X PUT -H "Authorization: Bearer $ANNA" -H 'Content-Type: application/json' localhost:8081/api/users/me -d '{"email":"anna@example.com","fullName":"Anna Hansen","phone":"+4512345678","smsOptIn":true}'
+```
+Samme kald igen uden ændringer sender intet event. `"smsOptIn":true` uden `phone` giver 400.
+
+**C. Ugyldigt input** – forvent 400 med en `errors`-liste:
+```bash
+curl -X PUT -H "Authorization: Bearer $ANNA" -H 'Content-Type: application/json' localhost:8081/api/users/me -d '{"email":"nope","fullName":""}'
+```
+
+**D. Adgangsregler**
+
+| Kommando | Forventet |
+|---|---|
+| `curl -i localhost:8081/api/users/me` | 401, intet token |
+| `curl -i -H "Authorization: Bearer abc" localhost:8081/api/users/me` | 401, ugyldigt token |
+| `curl -i -H "Authorization: Bearer $ANNA" localhost:8081/api/users` | 403, ikke admin |
+| `curl -H "Authorization: Bearer $ADMIN" localhost:8081/api/users` | 200, liste over brugere |
+
+**E. Skift rolle** (som admin):
+```bash
+curl -X PUT -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' localhost:8081/api/users/$ANNA_ID/role -d '{"role":"ADMIN"}'
+```
+
+**F. Slet konto** – sender `user.deleted`. Forvent 204, og derefter 403 "This account has been deleted":
+```bash
+curl -i -X DELETE -H "Authorization: Bearer $ANNA" localhost:8081/api/users/me
+curl -H "Authorization: Bearer $ANNA" localhost:8081/api/auth/validate
+```
+En slettet bruger forbliver blokeret – brug et nyt `sub` (fx `auth0|anna2`) for at teste forfra.
+
+**G. RabbitMQ nede** – outboxen holder på eventet:
+1. `docker stop notification-service-rabbitmq-1`
+2. Gentag B med et nyt telefonnummer → stadig 200, loggen viser `Could not publish … will retry`.
+3. `docker start notification-service-rabbitmq-1` → efter få sekunder logges `Published user.updated`.
+
+**Flere tests**
+
+| Test | Sådan | Forventet |
+|---|---|---|
+| Token uden e-mail | Token med kun `{"sub":"auth0|x"}`, kald `/api/auth/validate` | 401 |
+| E-mail optaget, anden case | Token med `"sub":"auth0|other","email":"ANNA@example.com"`, kald `/api/auth/validate` | 409 |
+| E-mail fri efter sletning | Slet Anna (F), gentag rækken ovenfor | 200 |
+
+### Hvor kan man se resultatet
+- **Konsollen (user-service):** `Published user.registered (eventId …)` for hvert event.
+- **Konsollen (notification-service):** `Received user.registered … producer user-service`.
+- **Mailpit:** http://localhost:8025 – velkomstmails.
+- **RabbitMQ UI:** http://localhost:15672 → *Exchanges* → `cinema.events` viser message rate.
+- **Database:** `localhost:5435`, `users_db`, postgres/postgres – tabellerne `users` og `outbox_events`
+  (`published_at`, `attempts`, `last_error`).
 
 ## Arkitektur
 
